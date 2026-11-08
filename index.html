@@ -1,0 +1,908 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>⏳ Checking...</title>
+    <link rel="manifest" href="manifest.webmanifest">
+    <meta name="theme-color" content="#2e9e5b">
+    <link rel="icon" type="image/png" href="icons/icon-192.png">
+    <link rel="apple-touch-icon" href="icons/icon-192.png">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-title" content="Net Status">
+    <style>
+        :root {
+            --bg: #f4f6f8;
+            --card: #ffffff;
+            --text: #1d2733;
+            --muted: #6b7785;
+            --border: #d5dbe1;
+            --online: #2e9e5b;
+            --offline: #d9453b;
+            --checking: #e0a21b;
+            --good: #2e9e5b;
+            --slow: #d99a12;
+            --poor: #d9453b;
+        }
+        @media (prefers-color-scheme: dark) {
+            :root {
+                --bg: #121212;
+                --card: #1e1e1e;
+                --text: #e6e6e6;
+                --muted: #8a949e;
+                --border: #333;
+            }
+        }
+        * { box-sizing: border-box; }
+        [hidden] { display: none !important; }
+        body {
+            margin: 0;
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+            background: var(--bg);
+            color: var(--text);
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+        }
+        .card {
+            width: 100%;
+            max-width: 440px;
+            background: var(--card);
+            border-radius: 16px;
+            padding: 40px 30px;
+            text-align: center;
+            box-shadow: 0 6px 24px rgba(0, 0, 0, 0.12);
+        }
+        .dot {
+            width: 110px;
+            height: 110px;
+            border-radius: 50%;
+            margin: 0 auto 24px;
+            background: var(--checking);
+            transition: background 0.3s ease;
+        }
+        .dot.online { background: var(--online); animation: pulse 2s infinite; }
+        .dot.limited { background: var(--checking); }
+        .dot.offline { background: var(--offline); }
+        @keyframes pulse {
+            0%   { box-shadow: 0 0 0 0 rgba(46, 158, 91, 0.5); }
+            70%  { box-shadow: 0 0 0 24px rgba(46, 158, 91, 0); }
+            100% { box-shadow: 0 0 0 0 rgba(46, 158, 91, 0); }
+        }
+        h1 { margin: 0 0 6px; font-size: 1.8rem; }
+        .detail { margin: 0 0 14px; font-size: 0.9rem; color: var(--muted); min-height: 1.2em; }
+
+        .sites { display: flex; justify-content: center; gap: 8px; flex-wrap: wrap; margin: 0 0 16px; min-height: 28px; }
+        .chip {
+            font-size: 0.8rem;
+            font-weight: 600;
+            padding: 4px 10px;
+            border-radius: 999px;
+            border: 1px solid var(--border);
+            color: var(--muted);
+        }
+        .chip.ok { border-color: var(--good); color: var(--good); }
+        .chip.fail { border-color: var(--poor); color: var(--poor); }
+
+        .latency {
+            border: 2px solid var(--border);
+            border-radius: 12px;
+            padding: 12px;
+            margin: 0 0 16px;
+            transition: border-color 0.3s ease;
+        }
+        .latency-label { font-size: 0.8rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.5px; }
+        .latency-value { font-size: 1.8rem; font-weight: bold; margin: 2px 0; }
+        .latency-rating { font-size: 0.9rem; font-weight: 600; }
+        .latency.good { border-color: var(--good); }
+        .latency.good .latency-value, .latency.good .latency-rating { color: var(--good); }
+        .latency.slow { border-color: var(--slow); }
+        .latency.slow .latency-value, .latency.slow .latency-rating { color: var(--slow); }
+        .latency.poor { border-color: var(--poor); }
+        .latency.poor .latency-value, .latency.poor .latency-rating { color: var(--poor); }
+
+        .ip-box {
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 10px 14px;
+            margin: 0 0 16px;
+            text-align: left;
+        }
+        .ip-row { display: flex; justify-content: space-between; align-items: center; gap: 10px; padding: 5px 0; }
+        .ip-row + .ip-row { border-top: 1px solid var(--border); }
+        .ip-label { font-size: 0.8rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.5px; }
+        .ip-value { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 0.95rem; word-break: break-all; text-align: right; }
+
+        canvas { width: 100%; height: 140px; display: block; }
+        .chart-box { border: 1px solid var(--border); border-radius: 12px; padding: 10px 12px; margin: 0 0 16px; text-align: left; }
+        .chart-title { font-size: 0.8rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 6px; }
+
+        .stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin: 0 0 14px; }
+        .stat { border: 1px solid var(--border); border-radius: 10px; padding: 8px 4px; }
+        .stat-label { font-size: 0.7rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.4px; }
+        .stat-value { font-size: 1.15rem; font-weight: bold; margin-top: 2px; }
+        .stat-value.good { color: var(--good); }
+        .stat-value.slow { color: var(--slow); }
+        .stat-value.poor { color: var(--poor); }
+
+        .log-section { margin-top: 20px; text-align: left; }
+        .log-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; }
+        button.link-btn { flex: none; padding: 4px 10px; font-size: 0.8rem; font-weight: 600; }
+        .log-list {
+            list-style: none; margin: 0; padding: 8px 10px; max-height: 150px; overflow-y: auto;
+            border: 1px solid var(--border); border-radius: 10px;
+            font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 0.8rem;
+        }
+        .log-list li { padding: 4px 0; color: var(--text); }
+        .log-list li + li { border-top: 1px solid var(--border); }
+        .log-list li.ongoing { color: var(--offline); font-weight: 600; }
+        .log-list li.empty { color: var(--muted); }
+
+        .info { color: var(--muted); font-size: 0.95rem; margin: 4px 0; }
+
+        .buttons { display: flex; gap: 10px; margin-top: 22px; }
+        button {
+            flex: 1;
+            padding: 12px 10px;
+            font-size: 0.95rem;
+            font-weight: 600;
+            border-radius: 10px;
+            border: 1px solid var(--border);
+            background: transparent;
+            color: var(--text);
+            cursor: pointer;
+        }
+        button:hover:not(:disabled) { border-color: var(--muted); }
+        button:disabled { opacity: 0.5; cursor: default; }
+        button.primary { background: var(--online); border-color: var(--online); color: #fff; }
+        button.alerts-on { border-color: var(--online); color: var(--online); }
+        .note { font-size: 0.8rem; color: var(--muted); margin-top: 12px; min-height: 1em; }
+    </style>
+</head>
+<body>
+    <div class="card">
+        <div id="dot" class="dot"></div>
+        <h1 id="status">Checking...</h1>
+        <p class="detail" id="detail">&nbsp;</p>
+
+        <div id="sites" class="sites"></div>
+
+        <div id="latencyBox" class="latency">
+            <div class="latency-label">Latency</div>
+            <div id="latencyValue" class="latency-value">--</div>
+            <div id="latencyRating" class="latency-rating">&nbsp;</div>
+        </div>
+
+        <div class="chart-box">
+            <div class="chart-title">Latency (last 60 checks, ms)</div>
+            <canvas id="chart"></canvas>
+        </div>
+
+        <div class="ip-box">
+            <div class="ip-row">
+                <span class="ip-label">Global IP</span>
+                <span id="globalIp" class="ip-value">--</span>
+            </div>
+            <div class="ip-row">
+                <span class="ip-label">Local IP</span>
+                <span id="localIp" class="ip-value">--</span>
+            </div>
+        </div>
+
+        <div class="stats">
+            <div class="stat"><div class="stat-label">Uptime today</div><div id="uptimeValue" class="stat-value">--</div></div>
+            <div class="stat"><div class="stat-label">Downtime</div><div id="downtimeValue" class="stat-value">0s</div></div>
+            <div class="stat"><div class="stat-label">Outages</div><div id="outageCount" class="stat-value">0</div></div>
+        </div>
+
+        <p class="info" id="lastChecked">Last checked: --</p>
+        <p class="info" id="lastOffline">Last offline: --</p>
+        <p class="info" id="countdown">Next check in: --</p>
+
+        <div class="buttons">
+            <button id="checkBtn" class="primary">Check now</button>
+            <button id="alertsBtn">🔕 Alerts: Off</button>
+            <button id="installBtn" hidden>⬇ Install app</button>
+        </div>
+        <div class="note" id="note"></div>
+
+        <div class="log-section">
+            <div class="log-head">
+                <span class="ip-label">Outage log</span>
+                <button id="clearBtn" class="link-btn">Clear</button>
+            </div>
+            <ul id="outageLog" class="log-list"></ul>
+        </div>
+    </div>
+
+    <script>
+        const INTERVAL_SECONDS = 10;
+        const RECHECK_SECONDS = 3;      // quick re-check after a first failure
+        const FAILS_BEFORE_OFFLINE = 2; // consecutive total failures needed to show Offline
+        const TIMEOUT_MS = 5000;
+        const GOOD_MS = 150;            // below this = good
+        const SLOW_MS = 400;            // below this = slow, above = poor
+        const VERY_SLOW_MS = 2000;      // median above this = "limited"
+
+        const TARGETS = [
+            { name: "Google",     url: "https://www.google.com/generate_204" },
+            { name: "Facebook",   url: "https://www.facebook.com/favicon.ico" },
+            { name: "Microsoft",  url: "https://www.microsoft.com/favicon.ico" },
+            { name: "Mozilla",    url: "https://detectportal.firefox.com/success.txt" },
+            { name: "Apple",      url: "https://captive.apple.com/hotspot-detect.html" }
+        ];
+
+        const MIN_SITES_FOR_ONLINE = 3; // sites that must answer to count as "working"
+
+        const dot = document.getElementById('dot');
+        const statusEl = document.getElementById('status');
+        const detailEl = document.getElementById('detail');
+        const sitesEl = document.getElementById('sites');
+        const latencyBox = document.getElementById('latencyBox');
+        const latencyValue = document.getElementById('latencyValue');
+        const latencyRating = document.getElementById('latencyRating');
+        const lastCheckedEl = document.getElementById('lastChecked');
+        const lastOfflineEl = document.getElementById('lastOffline');
+        const countdownEl = document.getElementById('countdown');
+        const checkBtn = document.getElementById('checkBtn');
+        const alertsBtn = document.getElementById('alertsBtn');
+        const noteEl = document.getElementById('note');
+
+        let secondsLeft = INTERVAL_SECONDS;
+        let checking = false;
+        let previousState = null;   // 'online' | 'limited' | 'offline' (null until first result)
+        let failStreak = 0;
+        let alertsOn = false;
+        let audioCtx = null;
+
+        // 24-hour time, e.g. 14:05:09
+        function formatTime(date) {
+            return date.toLocaleTimeString([], {
+                hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23'
+            });
+        }
+
+        // Remember the last offline moment, even after the page is reloaded
+        const OFFLINE_KEY = "lastOfflineTime";
+
+        function showLastOffline(date) {
+            const today = new Date().toDateString() === date.toDateString();
+            const day = today ? "" : date.toLocaleDateString([], { day: '2-digit', month: 'short' }) + " ";
+            lastOfflineEl.textContent = "Last offline: " + day + formatTime(date);
+        }
+
+        function recordOffline() {
+            const now = new Date();
+            showLastOffline(now);
+            try { localStorage.setItem(OFFLINE_KEY, String(now.getTime())); } catch (e) {}
+        }
+
+        function loadLastOffline() {
+            try {
+                const saved = Number(localStorage.getItem(OFFLINE_KEY));
+                if (saved) showLastOffline(new Date(saved));
+            } catch (e) {}
+        }
+
+        /* ---------- History: outage log, uptime, latency chart ---------- */
+
+        const OUTAGES_KEY = "outageLog";
+        const STATS_KEY = "uptimeStats";
+        const HEARTBEAT_KEY = "lastSeenTime";
+        const MAX_OUTAGES = 50;
+        const MAX_POINTS = 60;
+
+        const uptimeEl = document.getElementById('uptimeValue');
+        const downtimeEl = document.getElementById('downtimeValue');
+        const outageCountEl = document.getElementById('outageCount');
+        const logEl = document.getElementById('outageLog');
+        const clearBtn = document.getElementById('clearBtn');
+        const canvas = document.getElementById('chart');
+
+        let outages = [];                           // [{ s: start ms, e: end ms or null }]
+        let stats = { day: "", total: 0, up: 0 };   // checks counted today
+        let history = [];                           // latency per check, null = offline
+        let firstFailAt = null;                     // when the current run of failures began
+
+        function store(key, value) { try { localStorage.setItem(key, JSON.stringify(value)); } catch (e) {} }
+        function recall(key, fallback) {
+            try { const raw = localStorage.getItem(key); return raw ? JSON.parse(raw) : fallback; }
+            catch (e) { return fallback; }
+        }
+
+        function todayKey() {
+            const d = new Date();
+            return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0");
+        }
+        function startOfToday() { const d = new Date(); d.setHours(0, 0, 0, 0); return d.getTime(); }
+
+        function formatDuration(ms) {
+            const total = Math.max(0, Math.round(ms / 1000));
+            const h = Math.floor(total / 3600), m = Math.floor((total % 3600) / 60), sec = total % 60;
+            if (h) return h + "h " + String(m).padStart(2, "0") + "m " + String(sec).padStart(2, "0") + "s";
+            if (m) return m + "m " + String(sec).padStart(2, "0") + "s";
+            return sec + "s";
+        }
+
+        // 24-hour time, with the date added when it is not today
+        function stamp(ms) {
+            const d = new Date(ms);
+            const sameDay = d.toDateString() === new Date().toDateString();
+            const day = sameDay ? "" : d.toLocaleDateString([], { day: '2-digit', month: 'short' }) + " ";
+            return day + formatTime(d);
+        }
+
+        function hasOpenOutage() { return outages.length > 0 && outages[outages.length - 1].e === null; }
+
+        function openOutage(startMs) {
+            if (hasOpenOutage()) return;
+            outages.push({ s: startMs, e: null });
+            if (outages.length > MAX_OUTAGES) outages.shift();
+            store(OUTAGES_KEY, outages);
+        }
+
+        function closeOutage(endMs) {
+            if (!hasOpenOutage()) return;
+            outages[outages.length - 1].e = endMs;
+            store(OUTAGES_KEY, outages);
+        }
+
+        function countCheck(isUp) {
+            if (stats.day !== todayKey()) stats = { day: todayKey(), total: 0, up: 0 };
+            stats.total++;
+            if (isUp) stats.up++;
+            store(STATS_KEY, stats);
+        }
+
+        function addHistoryPoint(value) {
+            history.push(value);
+            if (history.length > MAX_POINTS) history.shift();
+        }
+
+        function downtimeToday() {
+            const from = startOfToday(), now = Date.now();
+            let sum = 0, count = 0;
+            outages.forEach(o => {
+                const end = (o.e === null) ? now : o.e;
+                const begin = Math.max(o.s, from);
+                if (end > begin) sum += end - begin;
+                if (end >= from) count++;
+            });
+            return { sum, count };
+        }
+
+        function renderStats() {
+            if (stats.day !== todayKey()) stats = { day: todayKey(), total: 0, up: 0 };
+            const { sum, count } = downtimeToday();
+
+            if (stats.total === 0) {
+                uptimeEl.textContent = "--";
+                uptimeEl.className = "stat-value";
+            } else {
+                const pct = Math.floor((stats.up / stats.total) * 1000) / 10;
+                uptimeEl.textContent = pct.toFixed(1) + "%";
+                uptimeEl.className = "stat-value " + (pct >= 99 ? "good" : pct >= 95 ? "slow" : "poor");
+            }
+            downtimeEl.textContent = formatDuration(sum);
+            outageCountEl.textContent = count;
+        }
+
+        function renderLog() {
+            logEl.textContent = "";
+            if (!outages.length) {
+                const li = document.createElement('li');
+                li.className = "empty";
+                li.textContent = "No outages recorded yet.";
+                logEl.appendChild(li);
+                return;
+            }
+            [...outages].reverse().forEach(o => {
+                const open = o.e === null;
+                const li = document.createElement('li');
+                li.textContent = stamp(o.s) + " → " + (open ? "ongoing" : stamp(o.e)) +
+                                 "  (" + formatDuration((open ? Date.now() : o.e) - o.s) + ")";
+                if (open) li.className = "ongoing";
+                logEl.appendChild(li);
+            });
+        }
+
+        function drawChart() {
+            const dpr = window.devicePixelRatio || 1;
+            const w = canvas.clientWidth, h = canvas.clientHeight;
+            if (!w || !h) return;
+            canvas.width = Math.round(w * dpr);
+            canvas.height = Math.round(h * dpr);
+            const ctx = canvas.getContext('2d');
+            ctx.scale(dpr, dpr);
+
+            const css = getComputedStyle(document.documentElement);
+            const color = (name) => css.getPropertyValue(name).trim();
+            const left = 34, right = 8, top = 8, bottom = 18;
+            const plotW = w - left - right, plotH = h - top - bottom;
+
+            ctx.font = "10px sans-serif";
+            ctx.textBaseline = "middle";
+
+            const values = history.filter(v => v !== null);
+            let max = Math.max(300, ...values);
+            max = Math.ceil((max * 1.1) / 100) * 100;
+
+            // Grid lines and labels
+            ctx.lineWidth = 1;
+            [0, 0.5, 1].forEach(f => {
+                const y = top + plotH - f * plotH;
+                ctx.strokeStyle = color('--border');
+                ctx.beginPath(); ctx.moveTo(left, y); ctx.lineTo(w - right, y); ctx.stroke();
+                ctx.fillStyle = color('--muted');
+                ctx.textAlign = "right";
+                ctx.fillText(String(Math.round(max * f)), left - 5, y);
+            });
+
+            ctx.fillStyle = color('--muted');
+            ctx.textBaseline = "alphabetic";
+            ctx.textAlign = "left";
+            ctx.fillText("older", left, h - 4);
+            ctx.textAlign = "right";
+            ctx.fillText("now", w - right, h - 4);
+
+            if (!history.length) {
+                ctx.textAlign = "center";
+                ctx.textBaseline = "middle";
+                ctx.fillText("Waiting for data...", w / 2, top + plotH / 2);
+                return;
+            }
+
+            const points = history.map((v, i) => ({
+                v,
+                x: left + ((MAX_POINTS - history.length + i) / (MAX_POINTS - 1)) * plotW,
+                y: v === null ? null : top + plotH - Math.min(v / max, 1) * plotH
+            }));
+
+            // Line (broken wherever a check was offline)
+            ctx.strokeStyle = color('--muted');
+            ctx.lineWidth = 1.5;
+            ctx.beginPath();
+            let drawing = false;
+            points.forEach(pt => {
+                if (pt.v === null) { drawing = false; return; }
+                if (!drawing) { ctx.moveTo(pt.x, pt.y); drawing = true; }
+                else ctx.lineTo(pt.x, pt.y);
+            });
+            ctx.stroke();
+
+            // Dots colored by quality, red bars for offline checks
+            points.forEach(pt => {
+                if (pt.v === null) {
+                    ctx.strokeStyle = color('--offline');
+                    ctx.lineWidth = 2;
+                    ctx.beginPath();
+                    ctx.moveTo(pt.x, top + plotH);
+                    ctx.lineTo(pt.x, top + plotH - 12);
+                    ctx.stroke();
+                    return;
+                }
+                ctx.fillStyle = pt.v < GOOD_MS ? color('--good') : pt.v < SLOW_MS ? color('--slow') : color('--poor');
+                ctx.beginPath();
+                ctx.arc(pt.x, pt.y, 3, 0, Math.PI * 2);
+                ctx.fill();
+            });
+        }
+
+        function initHistory() {
+            outages = recall(OUTAGES_KEY, []);
+            if (!Array.isArray(outages)) outages = [];
+            stats = recall(STATS_KEY, stats);
+
+            // If the page was closed during an outage, end it at the last time we saw it running
+            if (hasOpenOutage()) {
+                const last = outages[outages.length - 1];
+                last.e = Math.max(last.s, Number(recall(HEARTBEAT_KEY, last.s)) || last.s);
+                store(OUTAGES_KEY, outages);
+            }
+            renderStats();
+            renderLog();
+            drawChart();
+        }
+
+        function tickLive() {
+            renderStats();
+            if (hasOpenOutage()) renderLog();
+        }
+
+        clearBtn.addEventListener('click', () => {
+            if (!confirm("Clear the outage log and today's uptime stats?")) return;
+            const ongoing = hasOpenOutage() ? [{ s: outages[outages.length - 1].s, e: null }] : [];
+            outages = ongoing;
+            stats = { day: todayKey(), total: 0, up: 0 };
+            store(OUTAGES_KEY, outages);
+            store(STATS_KEY, stats);
+            renderStats();
+            renderLog();
+        });
+
+        window.addEventListener('resize', drawChart);
+        try { window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', drawChart); } catch (e) {}
+
+        /* ---------- Connection check ---------- */
+
+        // Returns the response time in ms, or null if the request failed
+        async function probe(target) {
+            const controller = new AbortController();
+            const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
+            const start = performance.now();
+            try {
+                await fetch(`${target.url}?t=${Date.now()}`, {
+                    mode: 'no-cors',
+                    cache: 'no-store',
+                    signal: controller.signal
+                });
+                return Math.round(performance.now() - start);
+            } catch (e) {
+                return null;
+            } finally {
+                clearTimeout(timer);
+            }
+        }
+
+        function median(numbers) {
+            const sorted = [...numbers].sort((a, b) => a - b);
+            return sorted[Math.floor(sorted.length / 2)];
+        }
+
+        async function checkConnection() {
+            if (checking) return;
+            checking = true;
+            checkBtn.disabled = true;
+            checkBtn.textContent = "Checking...";
+            const checkStarted = Date.now();
+
+            // Test all sites at the same time
+            const times = await Promise.all(TARGETS.map(probe));
+            const results = TARGETS.map((t, i) => ({ name: t.name, ms: times[i] }));
+            const reachable = results.filter(r => r.ms !== null);
+            const latency = reachable.length ? median(reachable.map(r => r.ms)) : null;
+
+            lastCheckedEl.textContent = "Last checked: " + formatTime(new Date());
+            renderSites(results);
+
+            let state;
+            if (reachable.length === 0) {
+                if (failStreak === 0 && firstFailAt === null) firstFailAt = checkStarted;
+                failStreak = (navigator.onLine === false) ? FAILS_BEFORE_OFFLINE : failStreak + 1;
+
+                if (failStreak < FAILS_BEFORE_OFFLINE) {
+                    // First failure: do not call it Offline yet, verify again shortly
+                    showVerifying();
+                    secondsLeft = RECHECK_SECONDS;
+                    countdownEl.textContent = "Verifying in: " + secondsLeft + "s";
+                    checking = false;
+                    checkBtn.disabled = false;
+                    checkBtn.textContent = "Check now";
+                    return;
+                }
+                state = 'offline';
+            } else {
+                failStreak = 0;
+                // Usable = at least 3 of 5 sites answered and the connection is not extremely slow
+                state = (reachable.length >= MIN_SITES_FOR_ONLINE && latency < VERY_SLOW_MS) ? 'online' : 'limited';
+            }
+
+            updateUI(state, latency, reachable.length);
+            if (state === 'offline') recordOffline();
+
+            // Outage log, uptime and chart
+            addHistoryPoint(state === 'offline' ? null : latency);
+            countCheck(state !== 'offline');
+            if (state === 'offline') {
+                openOutage(firstFailAt !== null ? firstFailAt : checkStarted);
+            } else {
+                closeOutage(Date.now());
+                firstFailAt = null;
+            }
+            store(HEARTBEAT_KEY, Date.now());
+            renderStats();
+            renderLog();
+            drawChart();
+
+            // Alert only on a real change of state (not on the first check)
+            if (previousState !== null && previousState !== state) {
+                notifyChange(state);
+            }
+
+            const cameBack = state !== 'offline' && previousState === 'offline';
+            previousState = state;
+
+            if (state === 'offline') {
+                globalIpEl.textContent = "--";
+                lastIpFetch = 0;
+            } else if (cameBack || Date.now() - lastIpFetch > 60000) {
+                loadGlobalIP();   // refresh on reconnect and about once a minute
+            }
+            if (cameBack) loadLocalIP();
+
+            secondsLeft = INTERVAL_SECONDS;
+            countdownEl.textContent = "Next check in: " + secondsLeft + "s";
+            checking = false;
+            checkBtn.disabled = false;
+            checkBtn.textContent = "Check now";
+        }
+
+        /* ---------- UI updates ---------- */
+
+        function renderSites(results) {
+            sitesEl.textContent = "";
+            results.forEach(r => {
+                const chip = document.createElement('span');
+                chip.className = "chip " + (r.ms !== null ? "ok" : "fail");
+                chip.textContent = (r.ms !== null ? "✓ " : "✗ ") + r.name;
+                sitesEl.appendChild(chip);
+            });
+        }
+
+        function showVerifying() {
+            statusEl.textContent = "Verifying...";
+            detailEl.textContent = "No reply yet. Checking again before calling it offline.";
+            dot.className = "dot";
+            document.title = "⏳ Verifying...";
+        }
+
+        function updateUI(state, latency, reachableCount) {
+            dot.className = "dot " + state;
+
+            if (state === 'online') {
+                statusEl.textContent = "Internet is working";
+                detailEl.textContent = reachableCount + " of " + TARGETS.length + " test sites reachable. You can use the internet.";
+                document.title = "🟢 Online";
+            } else if (state === 'limited') {
+                statusEl.textContent = "Connection limited";
+                detailEl.textContent = (reachableCount < MIN_SITES_FOR_ONLINE)
+                    ? "Only " + reachableCount + " of " + TARGETS.length + " test sites reachable. Some sites may not load."
+                    : "Connected but very slow. Pages may not load properly.";
+                document.title = "🟡 Limited";
+            } else {
+                statusEl.textContent = "No internet";
+                detailEl.textContent = "No test site answered " + FAILS_BEFORE_OFFLINE + " checks in a row.";
+                document.title = "🔴 Offline";
+            }
+
+            if (state === 'offline' || latency === null) {
+                latencyBox.className = "latency";
+                latencyValue.textContent = "--";
+                latencyRating.innerHTML = "&nbsp;";
+                return;
+            }
+
+            let level, label;
+            if (latency < GOOD_MS)      { level = "good"; label = "Good"; }
+            else if (latency < SLOW_MS) { level = "slow"; label = "Slow"; }
+            else                        { level = "poor"; label = "Poor"; }
+
+            latencyBox.className = "latency " + level;
+            latencyValue.textContent = latency + " ms";
+            latencyRating.textContent = label;
+        }
+
+        /* ---------- Alerts: sound + notification ---------- */
+
+        function beep(state) {
+            if (!audioCtx) return;
+            // Online: rising tones. Offline: falling tones. Limited: two equal tones.
+            const freqs = state === 'online' ? [660, 880]
+                        : state === 'offline' ? [440, 330]
+                        : [520, 520];
+            freqs.forEach((freq, i) => {
+                const osc = audioCtx.createOscillator();
+                const gain = audioCtx.createGain();
+                const t = audioCtx.currentTime + i * 0.2;
+                osc.type = "sine";
+                osc.frequency.value = freq;
+                gain.gain.setValueAtTime(0.0001, t);
+                gain.gain.exponentialRampToValueAtTime(0.3, t + 0.02);
+                gain.gain.exponentialRampToValueAtTime(0.0001, t + 0.18);
+                osc.connect(gain);
+                gain.connect(audioCtx.destination);
+                osc.start(t);
+                osc.stop(t + 0.2);
+            });
+        }
+
+        function notifyChange(state) {
+            if (!alertsOn) return;
+            beep(state);
+            if ("Notification" in window && Notification.permission === "granted") {
+                const titles = {
+                    online: "🟢 Internet is working",
+                    limited: "🟡 Connection limited",
+                    offline: "🔴 You went offline"
+                };
+                try {
+                    new Notification(titles[state], {
+                        body: "Status changed at " + formatTime(new Date())
+                    });
+                } catch (e) { /* some browsers block notifications on local files */ }
+            }
+        }
+
+        function setAlerts(on) {
+            alertsOn = on;
+            alertsBtn.textContent = on ? "🔔 Alerts: On" : "🔕 Alerts: Off";
+            alertsBtn.classList.toggle("alerts-on", on);
+        }
+
+        alertsBtn.addEventListener('click', async () => {
+            if (alertsOn) {
+                setAlerts(false);
+                noteEl.textContent = "";
+                return;
+            }
+
+            // Sound needs a click to be allowed, so it is unlocked here
+            if (!audioCtx) {
+                const AC = window.AudioContext || window.webkitAudioContext;
+                if (AC) audioCtx = new AC();
+            }
+            if (audioCtx && audioCtx.state === "suspended") await audioCtx.resume();
+
+            let popupsOk = false;
+            if ("Notification" in window) {
+                if (Notification.permission === "default") {
+                    try { await Notification.requestPermission(); } catch (e) {}
+                }
+                popupsOk = Notification.permission === "granted";
+            }
+
+            setAlerts(true);
+            beep('online'); // short test sound
+            noteEl.textContent = popupsOk
+                ? "You will get a sound and a popup when the status changes."
+                : "Sound alerts on. Popups are blocked or unsupported in this browser.";
+        });
+
+        /* ---------- IP addresses ---------- */
+
+        const globalIpEl = document.getElementById('globalIp');
+        const localIpEl = document.getElementById('localIp');
+        let lastIpFetch = 0;
+
+        const fromJson = (key) => (r) => r.json().then(d => d[key]);
+        const fromText = (r) => r.text().then(t => t.trim());
+        const fromTrace = (r) => r.text().then(t => (t.match(/^ip=(.+)$/m) || [])[1]);
+
+        // Several independent services: if one is blocked, the next is tried
+        const IP_SERVICES = [
+            { url: "https://api.ipify.org?format=json",   read: fromJson("ip") },
+            { url: "https://api64.ipify.org?format=json", read: fromJson("ip") },
+            { url: "https://1.1.1.1/cdn-cgi/trace",       read: fromTrace },
+            { url: "https://ipinfo.io/json",              read: fromJson("ip") },
+            { url: "https://api.my-ip.io/v2/ip.json",     read: fromJson("ip") },
+            { url: "https://checkip.amazonaws.com",       read: fromText },
+            { url: "https://icanhazip.com",               read: fromText },
+            { url: "https://ifconfig.me/ip",              read: fromText }
+        ];
+
+        async function loadGlobalIP() {
+            lastIpFetch = Date.now();
+            for (const svc of IP_SERVICES) {
+                const controller = new AbortController();
+                const timer = setTimeout(() => controller.abort(), 4000);
+                try {
+                    const res = await fetch(svc.url, { cache: 'no-store', signal: controller.signal });
+                    const ip = await svc.read(res);
+                    if (ip && /^[0-9a-fA-F:.]{3,45}$/.test(ip)) { globalIpEl.textContent = ip; return; }
+                } catch (e) {
+                    /* try the next service */
+                } finally {
+                    clearTimeout(timer);
+                }
+            }
+            globalIpEl.textContent = "Unavailable (click to retry)";
+            lastIpFetch = Date.now() - 45000;   // try again in about 15 seconds
+        }
+
+        globalIpEl.style.cursor = "pointer";
+        globalIpEl.title = "Click to refresh";
+        globalIpEl.addEventListener('click', () => {
+            globalIpEl.textContent = "...";
+            loadGlobalIP();
+        });
+
+        // Local IP comes from WebRTC. Many browsers hide it behind a random
+        // ".local" name for privacy, in which case we say so.
+        function loadLocalIP() {
+            if (!window.RTCPeerConnection) {
+                localIpEl.textContent = "Not supported";
+                return;
+            }
+            const found = new Set();
+            let hidden = false;
+            let finished = false;
+            const pc = new RTCPeerConnection({ iceServers: [] });
+
+            function finish() {
+                if (finished) return;
+                finished = true;
+                try { pc.close(); } catch (e) {}
+                if (found.size) {
+                    localIpEl.textContent = Array.from(found).join(", ");
+                } else if (hidden) {
+                    localIpEl.textContent = "Hidden by browser";
+                } else {
+                    localIpEl.textContent = "Unavailable";
+                }
+            }
+
+            pc.createDataChannel("");
+            pc.onicecandidate = (e) => {
+                if (!e.candidate) { finish(); return; }
+                const parts = e.candidate.candidate.split(" ");
+                const address = parts[4];
+                if (!address) return;
+                if (address.endsWith(".local")) hidden = true;
+                else if (/^\d{1,3}(\.\d{1,3}){3}$/.test(address)) found.add(address);
+            };
+            pc.createOffer()
+                .then(offer => pc.setLocalDescription(offer))
+                .catch(finish);
+            setTimeout(finish, 3000);
+        }
+
+        /* ---------- Timers and events ---------- */
+
+        checkBtn.addEventListener('click', checkConnection);
+
+        // Tick once per second: update the countdown and re-check at zero
+        setInterval(() => {
+            tickLive();
+            if (checking) return;
+            secondsLeft--;
+            if (secondsLeft <= 0) {
+                countdownEl.textContent = "Checking now...";
+                checkConnection();
+            } else {
+                const label = failStreak > 0 ? "Verifying in: " : "Next check in: ";
+                countdownEl.textContent = label + secondsLeft + "s";
+            }
+        }, 1000);
+
+        // React instantly when the browser notices a change
+        window.addEventListener('online', checkConnection);
+        window.addEventListener('offline', () => { failStreak = FAILS_BEFORE_OFFLINE - 1; checkConnection(); });
+
+        /* ---------- Install as an app (PWA) ---------- */
+
+        const installBtn = document.getElementById('installBtn');
+        let installPrompt = null;
+
+        window.addEventListener('beforeinstallprompt', (e) => {
+            e.preventDefault();          // keep the prompt so our own button can show it
+            installPrompt = e;
+            installBtn.hidden = false;
+        });
+
+        installBtn.addEventListener('click', async () => {
+            if (!installPrompt) return;
+            installPrompt.prompt();
+            await installPrompt.userChoice;
+            installPrompt = null;
+            installBtn.hidden = true;
+        });
+
+        window.addEventListener('appinstalled', () => { installBtn.hidden = true; });
+
+        // The service worker only works over https:// or http://localhost
+        if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {
+            window.addEventListener('load', () => {
+                navigator.serviceWorker.register('sw.js').catch(() => {});
+            });
+        }
+
+        loadLastOffline();
+        initHistory();
+        loadLocalIP();
+        checkConnection();
+    </script>
+</body>
+</html>
