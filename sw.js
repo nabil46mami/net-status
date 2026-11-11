@@ -3,7 +3,7 @@
 // (requests to Google, Microsoft, etc.) are never intercepted or cached,
 // otherwise the page could report "online" from saved data.
 
-const CACHE = "online-status-v1";
+const CACHE = "online-status-v2";
 const APP_FILES = [
   "./",
   "./index.html",
