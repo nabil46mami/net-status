@@ -141,6 +141,13 @@
         .log-list li.ongoing { color: var(--offline); font-weight: 600; }
         .log-list li.empty { color: var(--muted); }
 
+        .speed-box { border: 1px solid var(--border); border-radius: 12px; padding: 10px 12px 12px; margin: 0 0 16px; text-align: center; }
+        .speed-box .chart-title { text-align: left; }
+        .speed-box .stats { margin-bottom: 8px; }
+        .speed-status { font-size: 0.85rem; color: var(--muted); min-height: 1.2em; margin: 4px 0 8px; }
+        .speed-note { font-size: 0.75rem; color: var(--muted); margin-top: 8px; }
+        .speed-box button { width: 100%; }
+
         .info { color: var(--muted); font-size: 0.95rem; margin: 4px 0; }
 
         .buttons { display: flex; gap: 10px; margin-top: 22px; }
@@ -190,6 +197,18 @@
                 <span class="ip-label">Local IP</span>
                 <span id="localIp" class="ip-value">--</span>
             </div>
+        </div>
+
+        <div class="speed-box">
+            <div class="chart-title">Speed test</div>
+            <div class="stats">
+                <div class="stat"><div class="stat-label">Download Mbps</div><div id="dlValue" class="stat-value">--</div></div>
+                <div class="stat"><div class="stat-label">Upload Mbps</div><div id="ulValue" class="stat-value">--</div></div>
+                <div class="stat"><div class="stat-label">Ping / Jitter ms</div><div id="pingJitterValue" class="stat-value">--</div></div>
+            </div>
+            <div id="speedStatus" class="speed-status">No test run yet.</div>
+            <button id="speedBtn" class="primary">Run speed test</button>
+            <div class="speed-note">Each test uses up to about 50 MB of data.</div>
         </div>
 
         <div class="stats">
@@ -526,6 +545,168 @@
         window.addEventListener('resize', drawChart);
         try { window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', drawChart); } catch (e) {}
 
+        /* ---------- Speed test ---------- */
+
+        const SPEED_BASE = "https://speed.cloudflare.com";
+        const DOWNLOAD_SIZES = [2e6, 8e6, 24e6];   // bytes per download run
+        const UPLOAD_SIZES = [1e6, 4e6, 10e6];     // bytes per upload run
+        const SLOW_RUN_MS = 3500;                  // after a run this slow, skip the bigger ones
+        const SPEED_TIMEOUT_MS = 60000;            // stop the whole test after this long
+        const SPEED_KEY = "lastSpeedTest";
+
+        const speedBtn = document.getElementById('speedBtn');
+        const speedStatusEl = document.getElementById('speedStatus');
+        const dlEl = document.getElementById('dlValue');
+        const ulEl = document.getElementById('ulValue');
+        const pingJitterEl = document.getElementById('pingJitterValue');
+
+        let speedTesting = false;   // pauses the regular checks while the test runs
+        let speedAbort = null;
+
+        const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+        function fmtMbps(v) { return v >= 100 ? v.toFixed(0) : v.toFixed(1); }
+
+        // Ping and jitter: 8 tiny requests, the first one (connection setup) is dropped
+        async function measurePing(signal) {
+            const times = [];
+            for (let i = 0; i < 8; i++) {
+                const t0 = performance.now();
+                const res = await fetch(`${SPEED_BASE}/__down?bytes=0&t=${Date.now()}_${i}`, { cache: 'no-store', signal });
+                if (!res.ok) throw new Error("http");
+                await res.arrayBuffer();
+                times.push(performance.now() - t0);
+            }
+            times.shift();
+            let jitter = 0;
+            for (let i = 1; i < times.length; i++) jitter += Math.abs(times[i] - times[i - 1]);
+            jitter /= (times.length - 1);
+            return { ping: Math.round(median(times)), jitter: Math.round(jitter) };
+        }
+
+        // Download: the clock starts when the first data arrives, so connection delay is not counted
+        async function downloadRun(bytes, signal, onProgress) {
+            const res = await fetch(`${SPEED_BASE}/__down?bytes=${bytes}&t=${Date.now()}`, { cache: 'no-store', signal });
+            if (!res.ok) throw new Error("http");
+            const t0 = performance.now();
+
+            if (!res.body || !res.body.getReader) {
+                const buf = await res.arrayBuffer();
+                const ms = performance.now() - t0;
+                return { mbps: (buf.byteLength * 8) / (ms / 1000) / 1e6, ms };
+            }
+
+            const reader = res.body.getReader();
+            let firstAt = null, firstLen = 0, got = 0, lastUi = 0;
+            for (;;) {
+                const { done, value } = await reader.read();
+                if (done) break;
+                const now = performance.now();
+                if (firstAt === null) { firstAt = now; firstLen = value.length; }
+                got += value.length;
+                if (now - lastUi > 200 && now > firstAt) {
+                    lastUi = now;
+                    onProgress(((got - firstLen) * 8) / ((now - firstAt) / 1000) / 1e6);
+                }
+            }
+            const end = performance.now();
+            if (firstAt === null) throw new Error("empty");
+            const measured = got - firstLen;
+            if (measured <= 0 || end <= firstAt) {
+                return { mbps: (got * 8) / ((end - t0) / 1000) / 1e6, ms: end - t0 };
+            }
+            return { mbps: (measured * 8) / ((end - firstAt) / 1000) / 1e6, ms: end - t0 };
+        }
+
+        function makePayload(bytes) {
+            const chunk = new Uint8Array(65536);
+            crypto.getRandomValues(chunk);
+            const parts = [];
+            for (let n = 0; n < bytes; n += chunk.length) parts.push(chunk);
+            return new Blob(parts).slice(0, bytes);
+        }
+
+        // Upload: time for the whole request, minus one ping for the reply trip
+        async function uploadRun(bytes, signal, pingMs) {
+            const body = makePayload(bytes);
+            const t0 = performance.now();
+            const res = await fetch(`${SPEED_BASE}/__up`, { method: 'POST', body, cache: 'no-store', signal });
+            if (!res.ok) throw new Error("http");
+            await res.arrayBuffer();
+            const elapsed = performance.now() - t0;
+            const net = elapsed > pingMs * 2 ? elapsed - pingMs : elapsed;
+            return { mbps: (bytes * 8) / (net / 1000) / 1e6, ms: elapsed };
+        }
+
+        async function runSpeedTest() {
+            // The button turns into "Stop test" while running
+            if (speedTesting) { if (speedAbort) speedAbort.abort(); return; }
+
+            speedTesting = true;
+            speedAbort = new AbortController();
+            const signal = speedAbort.signal;
+            let timedOut = false;
+            const hardStop = setTimeout(() => { timedOut = true; speedAbort.abort(); }, SPEED_TIMEOUT_MS);
+
+            speedBtn.textContent = "Stop test";
+            checkBtn.disabled = true;
+            dlEl.textContent = ulEl.textContent = pingJitterEl.textContent = "--";
+
+            try {
+                while (checking) await sleep(200);   // let a running check finish first
+                if (previousState === 'offline') throw new Error("offline");
+
+                speedStatusEl.textContent = "Measuring ping...";
+                const { ping, jitter } = await measurePing(signal);
+                pingJitterEl.textContent = ping + " / " + jitter;
+
+                speedStatusEl.textContent = "Testing download...";
+                let bestDl = 0;
+                for (const size of DOWNLOAD_SIZES) {
+                    const run = await downloadRun(size, signal, (mbps) => { dlEl.textContent = fmtMbps(mbps); });
+                    bestDl = Math.max(bestDl, run.mbps);
+                    dlEl.textContent = fmtMbps(bestDl);
+                    if (run.ms > SLOW_RUN_MS) break;
+                }
+
+                speedStatusEl.textContent = "Testing upload...";
+                let bestUl = 0;
+                for (const size of UPLOAD_SIZES) {
+                    const run = await uploadRun(size, signal, ping);
+                    bestUl = Math.max(bestUl, run.mbps);
+                    ulEl.textContent = fmtMbps(bestUl);
+                    if (run.ms > SLOW_RUN_MS) break;
+                }
+
+                const done = Date.now();
+                store(SPEED_KEY, { t: done, dl: bestDl, ul: bestUl, ping, jitter });
+                speedStatusEl.textContent = "Finished at " + formatTime(new Date(done));
+            } catch (err) {
+                if (timedOut) speedStatusEl.textContent = "The test took too long and was stopped.";
+                else if (err && err.name === 'AbortError') speedStatusEl.textContent = "Test stopped.";
+                else if (err && err.message === 'offline') speedStatusEl.textContent = "You are offline. Run the test when you are back online.";
+                else speedStatusEl.textContent = "Speed test failed. speed.cloudflare.com may be blocked on your network.";
+            } finally {
+                clearTimeout(hardStop);
+                speedTesting = false;
+                speedAbort = null;
+                speedBtn.textContent = "Run speed test";
+                checkBtn.disabled = false;
+                secondsLeft = RECHECK_SECONDS;   // resume the regular checks shortly
+            }
+        }
+
+        function initSpeed() {
+            const last = recall(SPEED_KEY, null);
+            if (last && typeof last.dl === 'number') {
+                dlEl.textContent = fmtMbps(last.dl);
+                ulEl.textContent = fmtMbps(last.ul);
+                pingJitterEl.textContent = last.ping + " / " + last.jitter;
+                speedStatusEl.textContent = "Last test: " + stamp(last.t);
+            }
+        }
+
+        speedBtn.addEventListener('click', runSpeedTest);
+
         /* ---------- Connection check ---------- */
 
         // Returns the response time in ms, or null if the request failed
@@ -553,7 +734,7 @@
         }
 
         async function checkConnection() {
-            if (checking) return;
+            if (checking || speedTesting) return;
             checking = true;
             checkBtn.disabled = true;
             checkBtn.textContent = "Checking...";
@@ -856,7 +1037,7 @@
         // Tick once per second: update the countdown and re-check at zero
         setInterval(() => {
             tickLive();
-            if (checking) return;
+            if (checking || speedTesting) return;
             secondsLeft--;
             if (secondsLeft <= 0) {
                 countdownEl.textContent = "Checking now...";
@@ -901,6 +1082,7 @@
 
         loadLastOffline();
         initHistory();
+        initSpeed();
         loadLocalIP();
         checkConnection();
     </script>

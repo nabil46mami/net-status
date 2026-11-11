@@ -11,5 +11,5 @@ To test on your own computer, open a terminal in this folder and run:
 then visit http://localhost:8000 (localhost counts as secure).
 Opening index.html directly from disk still works as a normal page, but it cannot be installed.
 
-If you change index.html later, change CACHE = "online-status-v1" in sw.js to v2
+If you change index.html later, change CACHE = "online-status-v3" in sw.js to v4
 so installed copies pick up the update.
